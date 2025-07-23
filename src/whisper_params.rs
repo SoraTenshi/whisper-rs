@@ -1,6 +1,7 @@
 use crate::whisper_grammar::WhisperGrammarElement;
 use std::ffi::{c_char, c_float, c_int, CString};
 use std::marker::PhantomData;
+use std::ptr::NonNull;
 use std::sync::Arc;
 use whisper_rs_sys::whisper_token;
 
@@ -34,7 +35,7 @@ type SegmentCallbackFn = Box<dyn FnMut(SegmentCallbackData)>;
 
 #[derive(Clone)]
 pub struct FullParams<'a, 'b> {
-    pub(crate) fp: whisper_rs_sys::whisper_full_params,
+    pub(crate) fp: NonNull<whisper_rs_sys::whisper_full_params>,
     phantom_lang: PhantomData<&'a str>,
     phantom_tokens: PhantomData<&'b [c_int]>,
     grammar: Option<Vec<whisper_rs_sys::whisper_grammar_element>>,
@@ -47,27 +48,29 @@ impl<'a, 'b> FullParams<'a, 'b> {
     /// Create a new set of parameters for the decoder.
     pub fn new(sampling_strategy: SamplingStrategy) -> FullParams<'a, 'b> {
         let mut fp = unsafe {
-            whisper_rs_sys::whisper_full_default_params(match sampling_strategy {
-                SamplingStrategy::Greedy { .. } => {
-                    whisper_rs_sys::whisper_sampling_strategy_WHISPER_SAMPLING_GREEDY
-                }
-                SamplingStrategy::BeamSearch { .. } => {
-                    whisper_rs_sys::whisper_sampling_strategy_WHISPER_SAMPLING_BEAM_SEARCH
-                }
-            } as _)
+            NonNull::new_unchecked(whisper_rs_sys::whisper_full_default_params_by_ref(
+                match sampling_strategy {
+                    SamplingStrategy::Greedy { .. } => {
+                        whisper_rs_sys::whisper_sampling_strategy_WHISPER_SAMPLING_GREEDY
+                    }
+                    SamplingStrategy::BeamSearch { .. } => {
+                        whisper_rs_sys::whisper_sampling_strategy_WHISPER_SAMPLING_BEAM_SEARCH
+                    }
+                },
+            ))
         };
 
         match sampling_strategy {
-            SamplingStrategy::Greedy { best_of } => {
-                fp.greedy.best_of = best_of;
-            }
+            SamplingStrategy::Greedy { best_of } => unsafe {
+                fp.read().greedy.best_of = best_of;
+            },
             SamplingStrategy::BeamSearch {
                 beam_size,
                 patience,
-            } => {
-                fp.beam_search.beam_size = beam_size;
-                fp.beam_search.patience = patience;
-            }
+            } => unsafe {
+                fp.read().beam_search.beam_size = beam_size;
+                fp.read().beam_search.patience = patience;
+            },
         }
 
         Self {
@@ -85,70 +88,90 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to min(4, std::thread::hardware_concurrency()).
     pub fn set_n_threads(&mut self, n_threads: c_int) {
-        self.fp.n_threads = n_threads;
+        unsafe {
+            self.fp.read().n_threads = n_threads;
+        }
     }
 
     /// Max tokens to use from past text as prompt for the decoder
     ///
     /// Defaults to 16384.
     pub fn set_n_max_text_ctx(&mut self, n_max_text_ctx: c_int) {
-        self.fp.n_max_text_ctx = n_max_text_ctx;
+        unsafe {
+            self.fp.read().n_max_text_ctx = n_max_text_ctx;
+        }
     }
 
     /// Set the start offset in milliseconds to use for decoding.
     ///
     /// Defaults to 0.
     pub fn set_offset_ms(&mut self, offset_ms: c_int) {
-        self.fp.offset_ms = offset_ms;
+        unsafe {
+            self.fp.read().offset_ms = offset_ms;
+        }
     }
 
     /// Set the audio duration to process in milliseconds.
     ///
     /// Defaults to 0.
     pub fn set_duration_ms(&mut self, duration_ms: c_int) {
-        self.fp.duration_ms = duration_ms;
+        unsafe {
+            self.fp.read().duration_ms = duration_ms;
+        }
     }
 
     /// Set whether to translate the output to the language specified by `language`.
     ///
     /// Defaults to false.
     pub fn set_translate(&mut self, translate: bool) {
-        self.fp.translate = translate;
+        unsafe {
+            self.fp.read().translate = translate;
+        }
     }
 
     /// Do not use past transcription (if any) as initial prompt for the decoder.
     ///
     /// Defaults to false.
     pub fn set_no_context(&mut self, no_context: bool) {
-        self.fp.no_context = no_context;
+        unsafe {
+            self.fp.read().no_context = no_context;
+        }
     }
 
     /// Do not generate timestamps.
     ///
     /// Defaults to false.
     pub fn set_no_timestamps(&mut self, no_timestamps: bool) {
-        self.fp.no_timestamps = no_timestamps;
+        unsafe {
+            self.fp.read().no_timestamps = no_timestamps;
+        }
     }
 
     /// Force single segment output. This may be useful for streaming.
     ///
     /// Defaults to false.
     pub fn set_single_segment(&mut self, single_segment: bool) {
-        self.fp.single_segment = single_segment;
+        unsafe {
+            self.fp.read().single_segment = single_segment;
+        }
     }
 
     /// Print special tokens (e.g. `<SOT>`, `<EOT>`, `<BEG>`, etc.)
     ///
     /// Defaults to false.
     pub fn set_print_special(&mut self, print_special: bool) {
-        self.fp.print_special = print_special;
+        unsafe {
+            self.fp.read().print_special = print_special;
+        }
     }
 
     /// Set whether to print progress.
     ///
     /// Defaults to true.
     pub fn set_print_progress(&mut self, print_progress: bool) {
-        self.fp.print_progress = print_progress;
+        unsafe {
+            self.fp.read().print_progress = print_progress;
+        }
     }
 
     /// Print results from within whisper.cpp.
@@ -157,7 +180,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to false.
     pub fn set_print_realtime(&mut self, print_realtime: bool) {
-        self.fp.print_realtime = print_realtime;
+        unsafe {
+            self.fp.read().print_realtime = print_realtime;
+        }
     }
 
     /// Print timestamps for each text segment when printing realtime. Only has an effect if
@@ -165,7 +190,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to true.
     pub fn set_print_timestamps(&mut self, print_timestamps: bool) {
-        self.fp.print_timestamps = print_timestamps;
+        unsafe {
+            self.fp.read().print_timestamps = print_timestamps;
+        }
     }
 
     /// # EXPERIMENTAL
@@ -174,7 +201,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to false.
     pub fn set_token_timestamps(&mut self, token_timestamps: bool) {
-        self.fp.token_timestamps = token_timestamps;
+        unsafe {
+            self.fp.read().token_timestamps = token_timestamps;
+        }
     }
 
     /// # EXPERIMENTAL
@@ -183,7 +212,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to 0.01.
     pub fn set_thold_pt(&mut self, thold_pt: f32) {
-        self.fp.thold_pt = thold_pt;
+        unsafe {
+            self.fp.read().thold_pt = thold_pt;
+        }
     }
 
     /// # EXPERIMENTAL
@@ -192,7 +223,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to 0.01.
     pub fn set_thold_ptsum(&mut self, thold_ptsum: f32) {
-        self.fp.thold_ptsum = thold_ptsum;
+        unsafe {
+            self.fp.read().thold_ptsum = thold_ptsum;
+        }
     }
 
     /// # EXPERIMENTAL
@@ -201,7 +234,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to 0.
     pub fn set_max_len(&mut self, max_len: c_int) {
-        self.fp.max_len = max_len;
+        unsafe {
+            self.fp.read().max_len = max_len;
+        }
     }
 
     /// # EXPERIMENTAL
@@ -210,7 +245,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to false.
     pub fn set_split_on_word(&mut self, split_on_word: bool) {
-        self.fp.split_on_word = split_on_word;
+        unsafe {
+            self.fp.read().split_on_word = split_on_word;
+        }
     }
 
     /// # EXPERIMENTAL
@@ -219,7 +256,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to 0.
     pub fn set_max_tokens(&mut self, max_tokens: c_int) {
-        self.fp.max_tokens = max_tokens;
+        unsafe {
+            self.fp.read().max_tokens = max_tokens;
+        }
     }
 
     /// # EXPERIMENTAL
@@ -228,7 +267,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to false.
     pub fn set_debug_mode(&mut self, debug: bool) {
-        self.fp.debug_mode = debug;
+        unsafe {
+            self.fp.read().debug_mode = debug;
+        }
     }
 
     /// # EXPERIMENTAL
@@ -237,7 +278,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to 0.
     pub fn set_audio_ctx(&mut self, audio_ctx: c_int) {
-        self.fp.audio_ctx = audio_ctx;
+        unsafe {
+            self.fp.read().audio_ctx = audio_ctx;
+        }
     }
 
     /// # EXPERIMENTAL
@@ -247,7 +290,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to false.
     pub fn set_tdrz_enable(&mut self, tdrz_enable: bool) {
-        self.fp.tdrz_enable = tdrz_enable;
+        unsafe {
+            self.fp.read().tdrz_enable = tdrz_enable;
+        }
     }
 
     /// Set tokens to provide the model as initial input.
@@ -263,8 +308,10 @@ impl<'a, 'b> FullParams<'a, 'b> {
         let tokens_len: c_int = tokens.len() as c_int;
 
         // set the tokens
-        self.fp.prompt_tokens = tokens_ptr;
-        self.fp.prompt_n_tokens = tokens_len;
+        unsafe {
+            self.fp.read().prompt_tokens = tokens_ptr;
+            self.fp.read().prompt_n_tokens = tokens_len;
+        }
     }
 
     /// Set the target language.
@@ -273,12 +320,14 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to "en".
     pub fn set_language(&mut self, language: Option<&'a str>) {
-        self.fp.language = match language {
-            Some(language) => CString::new(language)
-                .expect("Language contains null byte")
-                .into_raw() as *const _,
-            None => std::ptr::null(),
-        };
+        unsafe {
+            self.fp.read().language = match language {
+                Some(language) => CString::new(language)
+                    .expect("Language contains null byte")
+                    .into_raw() as *const _,
+                None => std::ptr::null(),
+            };
+        }
     }
 
     /// Set `detect_language`.
@@ -287,7 +336,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to false.
     pub fn set_detect_language(&mut self, detect_language: bool) {
-        self.fp.detect_language = detect_language;
+        unsafe {
+            self.fp.read().detect_language = detect_language;
+        }
     }
 
     /// Set suppress_blank.
@@ -296,7 +347,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to true.
     pub fn set_suppress_blank(&mut self, suppress_blank: bool) {
-        self.fp.suppress_blank = suppress_blank;
+        unsafe {
+            self.fp.read().suppress_blank = suppress_blank;
+        }
     }
 
     /// Set suppress_non_speech_tokens.
@@ -305,7 +358,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to false.
     pub fn set_suppress_nst(&mut self, suppress_nst: bool) {
-        self.fp.suppress_nst = suppress_nst;
+        unsafe {
+            self.fp.read().suppress_nst = suppress_nst;
+        }
     }
 
     /// Set initial decoding temperature.
@@ -313,7 +368,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to 0.0.
     pub fn set_temperature(&mut self, temperature: f32) {
-        self.fp.temperature = temperature;
+        unsafe {
+            self.fp.read().temperature = temperature;
+        }
     }
 
     /// Set max_initial_ts.
@@ -322,7 +379,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to 1.0.
     pub fn set_max_initial_ts(&mut self, max_initial_ts: f32) {
-        self.fp.max_initial_ts = max_initial_ts;
+        unsafe {
+            self.fp.read().max_initial_ts = max_initial_ts;
+        }
     }
 
     /// Set length_penalty.
@@ -331,7 +390,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to -1.0.
     pub fn set_length_penalty(&mut self, length_penalty: f32) {
-        self.fp.length_penalty = length_penalty;
+        unsafe {
+            self.fp.read().length_penalty = length_penalty;
+        }
     }
 
     /// Set temperature_inc.
@@ -340,7 +401,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to 0.2.
     pub fn set_temperature_inc(&mut self, temperature_inc: f32) {
-        self.fp.temperature_inc = temperature_inc;
+        unsafe {
+            self.fp.read().temperature_inc = temperature_inc;
+        }
     }
 
     /// Set entropy_thold. Similar to OpenAI's compression_ratio_threshold.
@@ -348,7 +411,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to 2.4.
     pub fn set_entropy_thold(&mut self, entropy_thold: f32) {
-        self.fp.entropy_thold = entropy_thold;
+        unsafe {
+            self.fp.read().entropy_thold = entropy_thold;
+        }
     }
 
     /// Set logprob_thold.
@@ -357,14 +422,18 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to -1.0.
     pub fn set_logprob_thold(&mut self, logprob_thold: f32) {
-        self.fp.logprob_thold = logprob_thold;
+        unsafe {
+            self.fp.read().logprob_thold = logprob_thold;
+        }
     }
 
     /// Set no_speech_thold. Currently (as of v1.3.0) not implemented.
     ///
     /// Defaults to 0.6.
     pub fn set_no_speech_thold(&mut self, no_speech_thold: f32) {
-        self.fp.no_speech_thold = no_speech_thold;
+        unsafe {
+            self.fp.read().no_speech_thold = no_speech_thold;
+        }
     }
 
     /// Set the callback for new segments.
@@ -383,7 +452,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
         &mut self,
         new_segment_callback: crate::WhisperNewSegmentCallback,
     ) {
-        self.fp.new_segment_callback = new_segment_callback;
+        unsafe {
+            self.fp.read().new_segment_callback = new_segment_callback;
+        }
     }
 
     /// Set the user data to be passed to the new segment callback.
@@ -394,7 +465,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to None.
     pub unsafe fn set_new_segment_callback_user_data(&mut self, user_data: *mut std::ffi::c_void) {
-        self.fp.new_segment_callback_user_data = user_data;
+        unsafe {
+            self.fp.read().new_segment_callback_user_data = user_data;
+        }
     }
 
     /// Set the callback for segment updates.
@@ -455,14 +528,18 @@ impl<'a, 'b> FullParams<'a, 'b> {
                 // Raw pointer
                 let closure = Box::into_raw(closure);
 
-                self.fp.new_segment_callback_user_data = closure as *mut c_void;
-                self.fp.new_segment_callback = Some(trampoline::<SegmentCallbackFn>);
+                unsafe {
+                    self.fp.read().new_segment_callback_user_data = closure as *mut c_void;
+                    self.fp.read().new_segment_callback = Some(trampoline::<SegmentCallbackFn>);
+                }
                 self.segment_calllback_safe = None;
             }
             None => {
                 self.segment_calllback_safe = None;
-                self.fp.new_segment_callback = None;
-                self.fp.new_segment_callback_user_data = std::ptr::null_mut::<c_void>();
+                unsafe {
+                    self.fp.read().new_segment_callback = None;
+                    self.fp.read().new_segment_callback_user_data = std::ptr::null_mut::<c_void>();
+                }
             }
         }
     }
@@ -521,14 +598,18 @@ impl<'a, 'b> FullParams<'a, 'b> {
                 // Raw pointer
                 let closure = Box::into_raw(closure);
 
-                self.fp.new_segment_callback_user_data = closure as *mut c_void;
-                self.fp.new_segment_callback = Some(trampoline::<SegmentCallbackFn>);
+                unsafe {
+                    self.fp.read().new_segment_callback_user_data = closure as *mut c_void;
+                    self.fp.read().new_segment_callback = Some(trampoline::<SegmentCallbackFn>);
+                }
                 self.segment_calllback_safe = None;
             }
             None => {
                 self.segment_calllback_safe = None;
-                self.fp.new_segment_callback = None;
-                self.fp.new_segment_callback_user_data = std::ptr::null_mut::<c_void>();
+                unsafe {
+                    self.fp.read().new_segment_callback = None;
+                    self.fp.read().new_segment_callback_user_data = std::ptr::null_mut::<c_void>();
+                }
             }
         }
     }
@@ -548,7 +629,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
         &mut self,
         progress_callback: crate::WhisperProgressCallback,
     ) {
-        self.fp.progress_callback = progress_callback;
+        unsafe {
+            self.fp.read().progress_callback = progress_callback;
+        }
     }
 
     /// Set the callback for progress updates, potentially using a closure.
@@ -580,16 +663,23 @@ impl<'a, 'b> FullParams<'a, 'b> {
 
         match closure.into() {
             Some(closure) => {
-                self.fp.progress_callback = Some(trampoline::<Box<dyn FnMut(i32)>>);
+                unsafe {
+                    self.fp.read().progress_callback = Some(trampoline::<Box<dyn FnMut(i32)>>);
+                }
+
                 let boxed_closure = Box::new(closure) as Box<dyn FnMut(i32)>;
                 let boxed_closure = Box::new(boxed_closure);
                 let raw_ptr = Box::into_raw(boxed_closure);
-                self.fp.progress_callback_user_data = raw_ptr as *mut c_void;
+                unsafe {
+                    self.fp.read().progress_callback_user_data = raw_ptr as *mut c_void;
+                }
                 self.progress_callback_safe = None;
             }
             None => {
-                self.fp.progress_callback = None;
-                self.fp.progress_callback_user_data = std::ptr::null_mut::<c_void>();
+                unsafe {
+                    self.fp.read().progress_callback = None;
+                    self.fp.read().progress_callback_user_data = std::ptr::null_mut::<c_void>();
+                }
                 self.progress_callback_safe = None;
             }
         }
@@ -628,13 +718,17 @@ impl<'a, 'b> FullParams<'a, 'b> {
                 // Raw pointer
                 let closure = Box::into_raw(closure);
 
-                self.fp.abort_callback = Some(trampoline::<F>);
-                self.fp.abort_callback_user_data = closure as *mut c_void;
+                unsafe {
+                    self.fp.read().abort_callback = Some(trampoline::<F>);
+                    self.fp.read().abort_callback_user_data = closure as *mut c_void;
+                }
                 self.abort_callback_safe = None;
             }
             None => {
-                self.fp.abort_callback = None;
-                self.fp.abort_callback_user_data = std::ptr::null_mut::<c_void>();
+                unsafe {
+                    self.fp.read().abort_callback = None;
+                    self.fp.read().abort_callback_user_data = std::ptr::null_mut::<c_void>();
+                }
                 self.abort_callback_safe = None;
             }
         }
@@ -647,7 +741,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to None.
     pub unsafe fn set_progress_callback_user_data(&mut self, user_data: *mut std::ffi::c_void) {
-        self.fp.progress_callback_user_data = user_data;
+        unsafe {
+            self.fp.read().progress_callback_user_data = user_data;
+        }
     }
 
     /// Set the callback that is called each time before the encoder begins.
@@ -665,7 +761,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
         &mut self,
         start_encoder_callback: crate::WhisperStartEncoderCallback,
     ) {
-        self.fp.encoder_begin_callback = start_encoder_callback;
+        unsafe {
+            self.fp.read().encoder_begin_callback = start_encoder_callback;
+        }
     }
 
     /// Set the user data to be passed to the start encoder callback.
@@ -678,7 +776,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
         &mut self,
         user_data: *mut std::ffi::c_void,
     ) {
-        self.fp.encoder_begin_callback_user_data = user_data;
+        unsafe {
+            self.fp.read().encoder_begin_callback_user_data = user_data;
+        }
     }
 
     /// Set the callback that is called by each decoder to filter obtained logits.
@@ -696,7 +796,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
         &mut self,
         logits_filter_callback: crate::WhisperLogitsFilterCallback,
     ) {
-        self.fp.logits_filter_callback = logits_filter_callback;
+        unsafe {
+            self.fp.read().logits_filter_callback = logits_filter_callback;
+        }
     }
 
     /// Set the user data to be passed to the logits filter callback.
@@ -709,7 +811,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
         &mut self,
         user_data: *mut std::ffi::c_void,
     ) {
-        self.fp.logits_filter_callback_user_data = user_data;
+        unsafe {
+            self.fp.read().logits_filter_callback_user_data = user_data;
+        }
     }
 
     /// Set the callback that is called each time before ggml computation starts.
@@ -724,7 +828,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to None.
     pub unsafe fn set_abort_callback(&mut self, abort_callback: crate::WhisperAbortCallback) {
-        self.fp.abort_callback = abort_callback;
+        unsafe {
+            self.fp.read().abort_callback = abort_callback;
+        }
     }
 
     /// Set the user data to be passed to the abort callback.
@@ -734,7 +840,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to None.
     pub unsafe fn set_abort_callback_user_data(&mut self, user_data: *mut std::ffi::c_void) {
-        self.fp.abort_callback_user_data = user_data;
+        unsafe {
+            self.fp.read().abort_callback_user_data = user_data;
+        }
     }
 
     /// Enable an array of grammar elements to be passed to the whisper model.
@@ -751,13 +859,17 @@ impl<'a, 'b> FullParams<'a, 'b> {
             self.grammar = Some(inner);
 
             // set the grammar
-            self.fp.grammar_rules = grammar_ptr;
-            self.fp.n_grammar_rules = grammar_len;
+            unsafe {
+                self.fp.read().grammar_rules = grammar_ptr;
+                self.fp.read().n_grammar_rules = grammar_len;
+            }
         } else {
             self.grammar = None;
-            self.fp.grammar_rules = std::ptr::null_mut();
-            self.fp.n_grammar_rules = 0;
-            self.fp.i_start_rule = 0;
+            unsafe {
+                self.fp.read().grammar_rules = std::ptr::null_mut();
+                self.fp.read().n_grammar_rules = 0;
+                self.fp.read().i_start_rule = 0;
+            }
         }
     }
 
@@ -766,7 +878,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     /// Defaults to 0.
     pub fn set_start_rule(&mut self, start_rule: usize) {
         if self.grammar.is_some() {
-            self.fp.i_start_rule = start_rule;
+            unsafe {
+                self.fp.read().i_start_rule = start_rule;
+            }
         }
     }
 
@@ -774,7 +888,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     ///
     /// Defaults to 100.0.
     pub fn set_grammar_penalty(&mut self, grammar_penalty: f32) {
-        self.fp.grammar_penalty = grammar_penalty;
+        unsafe {
+            self.fp.read().grammar_penalty = grammar_penalty;
+        }
     }
 
     /// Set the initial prompt for the model.
@@ -796,9 +912,19 @@ impl<'a, 'b> FullParams<'a, 'b> {
     /// // ... further usage of params ...
     /// ```
     pub fn set_initial_prompt(&mut self, initial_prompt: &str) {
-        self.fp.initial_prompt = CString::new(initial_prompt)
-            .expect("Initial prompt contains null byte")
-            .into_raw() as *const c_char;
+        unsafe {
+            self.fp.read().initial_prompt = CString::new(initial_prompt)
+                .expect("Initial prompt contains null byte")
+                .into_raw() as *const c_char;
+        }
+    }
+}
+
+impl<'a, 'b> Drop for FullParams<'a, 'b> {
+    fn drop(&mut self) {
+        unsafe {
+            whisper_rs_sys::whisper_free_params(self.fp.as_ptr());
+        }
     }
 }
 
@@ -816,7 +942,7 @@ mod test_whisper_params_initial_prompt {
         pub fn get_initial_prompt(&self) -> &str {
             // SAFETY: Ensure this is safe and respects the lifetime of the string in self.fp
             unsafe {
-                std::ffi::CStr::from_ptr(self.fp.initial_prompt)
+                std::ffi::CStr::from_ptr(self.fp.read().initial_prompt)
                     .to_str()
                     .unwrap()
             }

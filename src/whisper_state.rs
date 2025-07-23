@@ -285,7 +285,7 @@ impl WhisperState {
             whisper_rs_sys::whisper_full_with_state(
                 self.ctx.ctx,
                 self.ptr,
-                params.fp,
+                params.fp.read(),
                 data.as_ptr(),
                 data.len() as c_int,
             )
